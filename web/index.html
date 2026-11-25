@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Court Check: is the gym packed?</title>
+<style>
+  :root {
+    --bg: #f6f4f1; --card: #fff; --ink: #1d1b19; --muted: #6b655e; --line: #e4dfd8;
+    --brand: #4b2e83; --open: #1f8a4c; --busy: #c47f00; --packed: #c0392b; --none: #8a847c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--brand); color: #fff; padding: 22px 20px 18px; }
+  header h1 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
+  header p { margin: 4px 0 0; opacity: .85; }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px; display: grid; gap: 20px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  h2 { margin: 0 0 12px; font-size: 17px; }
+  .controls, form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  label.check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 14px; padding-bottom: 8px; }
+  select, input[type=number], input[type=text] { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; min-width: 150px; }
+  input[type=text] { min-width: 260px; }
+  button { font: inherit; font-weight: 600; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--brand); color: #fff; cursor: pointer; }
+  button:hover { filter: brightness(1.1); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin-top: 14px; }
+  .gym { border: 1px solid var(--line); border-left: 6px solid var(--none); border-radius: 10px; padding: 12px 14px; }
+  .gym h3 { margin: 0; font-size: 16px; }
+  .gym .where { color: var(--muted); font-size: 12px; }
+  .level { display: inline-block; margin-top: 8px; font-weight: 700; font-size: 13px; padding: 2px 9px; border-radius: 99px; color: #fff; background: var(--none); }
+  .gym.Open { border-left-color: var(--open); }   .gym.Open .level { background: var(--open); }
+  .gym.Busy { border-left-color: var(--busy); }   .gym.Busy .level { background: var(--busy); }
+  .gym.Packed { border-left-color: var(--packed); } .gym.Packed .level { background: var(--packed); }
+  .need { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 700; color: var(--brand); border: 1px solid var(--brand); border-radius: 99px; padding: 1px 8px; }
+  .people { font-size: 26px; font-weight: 700; margin-top: 6px; }
+  .people small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .note { margin-top: 4px; font-style: italic; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; }
+  #msg, #formMsg { margin: 10px 0 0; font-size: 14px; }
+  .error { color: var(--packed); } .ok { color: var(--open); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏀 Court Check</h1>
+  <p>Is the IMA gym packed? Does a game need players? Updates from people who are there.</p>
+</header>
+<main>
+  <section>
+    <h2>Right now</h2>
+    <div class="controls">
+      <label>Gym
+        <select id="gymFilter"><option value="">All gyms</option></select>
+      </label>
+      <label>Reports from the last
+        <select id="hours">
+          <option value="1">1 hour</option>
+          <option value="2" selected>2 hours</option>
+          <option value="6">6 hours</option>
+        </select>
+      </label>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+    <p id="msg"></p>
+    <div id="status" class="grid"></div>
+  </section>
+
+  <section>
+    <h2>I'm at a gym: post an update</h2>
+    <form id="reportForm">
+      <label>Your name <select id="player" required></select></label>
+      <label>Gym <select id="gym" required></select></label>
+      <label>People here <input id="people" type="number" min="0" max="200" required placeholder="e.g. 14"></label>
+      <label class="check"><input id="needPlayers" type="checkbox"> We need players</label>
+      <label>Note (optional) <input id="note" type="text" maxlength="200" placeholder="e.g. Need 2 for full court"></label>
+      <button type="submit">Post update</button>
+    </form>
+    <p id="formMsg"></p>
+  </section>
+
+  <section>
+    <h2>Recent reports</h2>
+    <table>
+      <thead><tr><th>When</th><th>Gym</th><th>People</th><th>Need players?</th><th>Note</th><th>By</th></tr></thead>
+      <tbody id="reports"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function getJSON(url, options) {
+  const res = await fetch(url, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function ago(mins) {
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h + ' h ' + (m ? m + ' min ' : '') + 'ago';
+}
+// Builds an element with text only (never HTML), so notes people type can't inject markup.
+function el(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+function fillSelect(select, rows, valueKey, textKey, keepFirst) {
+  if (!keepFirst) select.innerHTML = '';
+  for (const r of rows) {
+    const o = el('option', null, r[textKey]);
+    o.value = r[valueKey];
+    select.appendChild(o);
+  }
+}
+
+async function loadStatus() {
+  const qs = new URLSearchParams({ gym: $('gymFilter').value, hours: $('hours').value });
+  $('msg').textContent = 'Loading…'; $('msg').className = '';
+  try {
+    const [status, reports] = await Promise.all([
+      getJSON('/api/status?' + qs), getJSON('/api/reports?' + qs)
+    ]);
+    $('msg').textContent = status.length ? '' : 'No gyms found.';
+
+    const grid = $('status'); grid.innerHTML = '';
+    for (const g of status) {
+      const card = el('div', 'gym ' + (g.CrowdLevel.includes(' ') ? '' : g.CrowdLevel));
+      card.appendChild(el('h3', null, g.Name));
+      card.appendChild(el('div', 'where', g.Building + ' · ' + g.Courts + (g.Courts === 1 ? ' court' : ' courts')));
+      const level = el('div'); level.appendChild(el('span', 'level', g.CrowdLevel));
+      if (g.NeedPlayers) level.appendChild(el('span', 'need', 'Needs players'));
+      card.appendChild(level);
+      if (g.PeopleCount !== null) {
+        const p = el('div', 'people', g.PeopleCount + ' '); p.appendChild(el('small', null, 'people'));
+        card.appendChild(p);
+        if (g.Note) card.appendChild(el('div', 'note', '“' + g.Note + '”'));
+        card.appendChild(el('div', 'meta', ago(g.MinutesAgo) + ' by ' + g.ReportedBy + ' · ' +
+          g.ReportsInWindow + (g.ReportsInWindow === 1 ? ' report' : ' reports') + ' in window'));
+      } else {
+        card.appendChild(el('div', 'meta', 'Nobody has reported in this window. Be the first!'));
+      }
+      grid.appendChild(card);
+    }
+
+    const body = $('reports'); body.innerHTML = '';
+    if (!reports.length) {
+      const tr = el('tr'); const td = el('td', null, 'No reports in this window.'); td.colSpan = 6;
+      tr.appendChild(td); body.appendChild(tr);
+    }
+    for (const r of reports) {
+      const tr = el('tr');
+      tr.appendChild(el('td', null, ago(r.MinutesAgo)));
+      tr.appendChild(el('td', null, r.Gym));
+      tr.appendChild(el('td', 'num', r.PeopleCount));
+      tr.appendChild(el('td', null, r.NeedPlayers ? 'Yes' : ''));
+      tr.appendChild(el('td', null, r.Note || ''));
+      tr.appendChild(el('td', null, r.ReportedBy));
+      body.appendChild(tr);
+    }
+  } catch (err) {
+    $('msg').textContent = 'Could not load: ' + err.message; $('msg').className = 'error';
+  }
+}
+
+$('reportForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    await getJSON('/api/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        gymId: $('gym').value, playerId: $('player').value, peopleCount: $('people').value,
+        needPlayers: $('needPlayers').checked, note: $('note').value
+      })
+    });
+    $('formMsg').textContent = 'Posted. Thanks!'; $('formMsg').className = 'ok';
+    $('people').value = ''; $('note').value = ''; $('needPlayers').checked = false;
+    loadStatus();
+  } catch (err) {
+    $('formMsg').textContent = err.message; $('formMsg').className = 'error';
+  }
+});
+$('refresh').addEventListener('click', loadStatus);
+$('gymFilter').addEventListener('change', loadStatus);
+$('hours').addEventListener('change', loadStatus);
+
+(async () => {
+  try {
+    const [gyms, players] = await Promise.all([getJSON('/api/gyms'), getJSON('/api/players')]);
+    fillSelect($('gymFilter'), gyms, 'GymID', 'Name', true);
+    fillSelect($('gym'), gyms, 'GymID', 'Name');
+    fillSelect($('player'), players, 'PlayerID', 'DisplayName');
+  } catch (err) {
+    $('msg').textContent = 'Could not load gyms: ' + err.message; $('msg').className = 'error';
+  }
+  loadStatus();
+})();
+</script>
+</body>
+</html>
